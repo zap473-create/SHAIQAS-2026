@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -618,15 +617,17 @@ video{width:100%;height:100%;object-fit:cover;}
     $('camError').style.display = 'none';
     const hints = new Map();
     hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-      ZXing.BarcodeFormat.PDF_417, ZXing.BarcodeFormat.CODE_128,
-      ZXing.BarcodeFormat.CODE_39, ZXing.BarcodeFormat.QR_CODE, ZXing.BarcodeFormat.DATA_MATRIX
+      ZXing.BarcodeFormat.PDF_417, ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_93,
+      ZXing.BarcodeFormat.CODE_39, ZXing.BarcodeFormat.CODABAR, ZXing.BarcodeFormat.ITF,
+      ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8, ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E,
+      ZXing.BarcodeFormat.QR_CODE, ZXing.BarcodeFormat.DATA_MATRIX, ZXing.BarcodeFormat.AZTEC
     ]);
     hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
     reader = new ZXing.BrowserMultiFormatReader(hints);
     scanning = true;
 
     reader.decodeFromConstraints(
-      { video: { facingMode: { ideal: 'environment' }, width:{ideal:1280}, height:{ideal:720} } },
+      { video: { facingMode: { ideal: 'environment' }, width:{ideal:1920}, height:{ideal:1080} } },
       'video',
       (result) => {
         if(overlayLocked || !scanning) return;
@@ -643,7 +644,10 @@ video{width:100%;height:100%;object-fit:cover;}
   }
   function handleScan(rawText){
     const iin = extractIin(rawText);
-    if(!iin) return;
+    if(!iin){
+      showToast('Считано, но ИИН не найден: ' + rawText.slice(0,60), false);
+      return;
+    }
     checkIin(iin);
   }
 

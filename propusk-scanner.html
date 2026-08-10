@@ -622,11 +622,26 @@ video{width:100%;height:100%;object-fit:cover;}
     scanning = true;
     try{
       mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' }, width:{ideal:1920}, height:{ideal:1080} }
+        video: {
+          facingMode: { ideal: 'environment' },
+          width:{ideal:1920}, height:{ideal:1080},
+          focusMode: { ideal: 'continuous' },
+          advanced: [{ focusMode: 'continuous' }]
+        }
       });
       const video = document.getElementById('video');
       video.srcObject = mediaStream;
       await video.play();
+
+      // Some Android/Chrome versions need focus mode applied via applyConstraints
+      // on the track itself after the stream starts, not just in the initial request.
+      try{
+        const track = mediaStream.getVideoTracks()[0];
+        const caps = track.getCapabilities ? track.getCapabilities() : {};
+        if(caps.focusMode && caps.focusMode.includes('continuous')){
+          await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+        }
+      }catch(e){ /* not supported on this device — ignore */ }
 
       if('BarcodeDetector' in window){
         let formats;
@@ -769,6 +784,18 @@ video{width:100%;height:100%;object-fit:cover;}
   function openManual(){ $('manualModal').classList.add('show'); $('manualInput').value=''; $('manualInput').focus(); }
   function closeManual(){ $('manualModal').classList.remove('show'); }
   $('manualBtn').addEventListener('click', openManual);
+  $('video-wrap').addEventListener('click', async ()=>{
+    if(!mediaStream) return;
+    try{
+      const track = mediaStream.getVideoTracks()[0];
+      const caps = track.getCapabilities ? track.getCapabilities() : {};
+      if(caps.focusMode){
+        await track.applyConstraints({ advanced: [{ focusMode: 'manual' }] }).catch(()=>{});
+        await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+        showToast('Перефокусировка…', true);
+      }
+    }catch(e){}
+  });
   $('manualFromError').addEventListener('click', openManual);
   $('manualClose').addEventListener('click', closeManual);
   $('manualModal').addEventListener('click', e=>{ if(e.target.id==='manualModal') closeManual(); });

@@ -180,6 +180,7 @@ video{width:100%;height:100%;object-fit:cover;}
 <body>
 <div id="app">
 
+  <!-- ============ LOADING SCREEN ============ -->
   <div class="screen active" id="screen-loading">
     <div class="eyebrow"><span class="dot busy" id="loadDot"></span>КПП · SHAIQAS · ЛИСТ «ОБЩИЙ»</div>
     <div class="spinner" id="loadSpinner"></div>
@@ -191,6 +192,7 @@ video{width:100%;height:100%;object-fit:cover;}
     </div>
   </div>
 
+  <!-- ============ SETUP SCREEN (manual fallback) ============ -->
   <div class="screen" id="screen-setup">
     <div style="padding:22px 18px 0;">
       <div class="eyebrow"><span class="dot err"></span>РЕЗЕРВНАЯ ЗАГРУЗКА</div>
@@ -237,6 +239,7 @@ video{width:100%;height:100%;object-fit:cover;}
     </div>
   </div>
 
+  <!-- ============ SCAN SCREEN ============ -->
   <div class="screen" id="screen-scan">
     <div class="scan-topbar">
       <div class="row" style="flex:0 0 auto;gap:6px;">
@@ -289,6 +292,7 @@ video{width:100%;height:100%;object-fit:cover;}
     </div>
   </div>
 
+  <!-- ============ RESULT OVERLAY ============ -->
   <div id="overlay">
     <div class="gate-ring" id="gateRing">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" id="gateIcon"></svg>
@@ -302,6 +306,7 @@ video{width:100%;height:100%;object-fit:cover;}
     <p class="gate-tap">НАЖМИТЕ, ЧТОБЫ ПРОДОЛЖИТЬ СКАНИРОВАНИЕ</p>
   </div>
 
+  <!-- ============ MANUAL ENTRY MODAL ============ -->
   <div class="modal-backdrop" id="manualModal">
     <div class="modal">
       <p class="modal-title">Ручной ввод ИИН<span class="icon-btn" id="manualClose" style="width:30px;height:30px;">✕</span></p>
@@ -312,6 +317,7 @@ video{width:100%;height:100%;object-fit:cover;}
     </div>
   </div>
 
+  <!-- ============ LOG MODAL ============ -->
   <div class="modal-backdrop" id="logModal">
     <div class="modal">
       <p class="modal-title">Журнал сканирований<span class="icon-btn" id="logClose" style="width:30px;height:30px;">✕</span></p>
@@ -327,11 +333,13 @@ video{width:100%;height:100%;object-fit:cover;}
 (function(){
   "use strict";
 
+  // ---------- fixed data source: SHAIQAS spreadsheet, tab "Общий" ----------
   const SHEET_ID = '1c6H5qVpVSmWeljzEjm-NOwhEoIYuRGO633SJ0-O1t2w';
-  const SHEET_GID = '192372439';
+  const SHEET_GID = '192372439'; // "Общий"
   const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}`;
 
-  let guestMap = new Map();
+  // ---------- state ----------
+  let guestMap = new Map();      // iin -> {name, meta}
   let reader = null;
   let scanning = false;
   let overlayLocked = false;
@@ -340,6 +348,7 @@ video{width:100%;height:100%;object-fit:cover;}
 
   const $ = id => document.getElementById(id);
 
+  // ---------- persistence (offline cache fallback only) ----------
   function saveList(){
     try{ localStorage.setItem('propusk_guestlist_cache', JSON.stringify([...guestMap.entries()])); }catch(e){}
   }
@@ -351,6 +360,7 @@ video{width:100%;height:100%;object-fit:cover;}
     return false;
   }
 
+  // ---------- CSV parsing helpers ----------
   function normalizeHeader(h){ return (h||"").toString().trim().toLowerCase(); }
   function findCol(fields, candidates){
     for(const f of fields){
@@ -387,17 +397,93 @@ video{width:100%;height:100%;object-fit:cover;}
     return newMap;
   }
 
+  // ---------- auto load from Google Sheet (JSONP — avoids browser CORS block on fetch()) ----------
+  function fetchFromSheetJSONP(){
+    return new Promise((resolve, reject) => {
+      const callbackName = 'gsCallback_' + Date.now();
+      let settled = false;
+      const timer = setTimeout(() => {
+        if(settled) return;
+        settled = true;
+        cleanup();
+        reject(new Error('Таймаут загрузки данных из таблицы'));
+      }, 12000);
+
+      function cleanup(){
+        clearTimeout(timer);
+        delete window[callbackName];
+        if(script.parentNode) script.parentNode.removeChild(script);
+      }
+
+      window[callbackName] = function(response){
+        if(settled) return;
+        settled = true;
+        cleanup();
+        try{
+          if(!response || response.status === 'error'){
+            const msg = (response && response.errors && response.errors[0] && response.errors[0].detailed_message) || 'Ошибка запроса к таблице (проверьте, что лист «Общий» существует и доступен)';
+            reject(new Error(msg));
+            return;
+          }
+          const table = response.table;
+          const cols = table.cols.map(c => (c.label || c.id || '').toString());
+          const rows = table.rows.map(r => (r.c || []).map(cell => cell ? (cell.v !== undefined && cell.v !== null ? cell.v : '') : ''));
+          resolve({cols, rows});
+        }catch(e){ reject(e); }
+      };
+
+      const script = document.createElement('script');
+      script.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?gid=${SHEET_GID}&headers=1&tqx=out:json;responseHandler:${callbackName}&t=${Date.now()}`;
+      script.onerror = () => {
+        if(settled) return;
+        settled = true;
+        cleanup();
+        reject(new Error('Не удалось загрузить скрипт данных — проверьте, что таблица открыта по ссылке хотя бы «для просмотра»'));
+      };
+      document.body.appendChild(script);
+    });
+  }
+
+  function ingestTable(cols, rows){
+    let iinIdx = cols.findIndex(c => normalizeHeader(c).includes('иин'));
+    let nameIdx = cols.findIndex(c => normalizeHeader(c).includes('фио'));
+    let catIdx = cols.findIndex(c => normalizeHeader(c).includes('категор'));
+    let dataRows = rows;
+
+    // Fallback: Google didn't recognise row 1 as a header (generic "A"/"B"/"C" labels) —
+    // check if the first data row itself looks like a header and use it instead.
+    if(iinIdx === -1 && rows.length){
+      const firstRow = rows[0].map(v => normalizeHeader(v));
+      const altIin = firstRow.findIndex(v => v.includes('иин'));
+      if(altIin > -1){
+        iinIdx = altIin;
+        nameIdx = firstRow.findIndex(v => v.includes('фио'));
+        catIdx = firstRow.findIndex(v => v.includes('категор'));
+        dataRows = rows.slice(1);
+      }
+    }
+
+    const newMap = new Map();
+    dataRows.forEach(row => {
+      const iinRaw = iinIdx > -1 ? row[iinIdx] : row[1];
+      const name = nameIdx > -1 ? row[nameIdx] : row[0];
+      const meta = catIdx > -1 ? row[catIdx] : row[2];
+      const iin = digitsOnly(iinRaw);
+      if(iin.length === 12){
+        newMap.set(iin, {name: (name||'').toString().trim(), meta: (meta||'').toString().trim()});
+      }
+    });
+    return newMap;
+  }
+
   function fetchFromSheet(){
-    return fetch(CSV_URL, {cache:'no-store'})
-      .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
-      .then(text=>{
-        const parsed = Papa.parse(text, {header:true, skipEmptyLines:true});
-        const map = ingestRows(parsed.data, parsed.meta.fields);
-        if(map.size === 0) throw new Error('в листе не найдено ни одной строки с 12-значным ИИН');
-        guestMap = map;
-        saveList();
-        return map.size;
-      });
+    return fetchFromSheetJSONP().then(({cols, rows}) => {
+      const map = ingestTable(cols, rows);
+      if(map.size === 0) throw new Error('в листе не найдено ни одной строки с 12-значным ИИН');
+      guestMap = map;
+      saveList();
+      return map.size;
+    });
   }
 
   function attemptAutoLoad(){
@@ -433,6 +519,7 @@ video{width:100%;height:100%;object-fit:cover;}
     showScreen('screen-setup');
   });
 
+  // ---------- fallback setup screen (manual CSV/paste) ----------
   document.querySelectorAll('.tab').forEach(tab=>{
     tab.addEventListener('click', ()=>{
       document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
@@ -486,6 +573,7 @@ video{width:100%;height:100%;object-fit:cover;}
 
   $('startScanBtn').addEventListener('click', ()=>{ showScreen('screen-scan'); startCamera(); });
 
+  // ---------- screens ----------
   function showScreen(id){
     document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
     $(id).classList.add('active');
@@ -510,6 +598,7 @@ video{width:100%;height:100%;object-fit:cover;}
       .finally(()=> btn.classList.remove('spinning'));
   });
 
+  // ---------- IIN extraction ----------
   function isValidIinShape(iin){
     const mm = +iin.slice(2,4), dd = +iin.slice(4,6), c = +iin[6];
     if(mm < 1 || mm > 12) return false;
@@ -523,6 +612,7 @@ video{width:100%;height:100%;object-fit:cover;}
     return valid[0] || matches[0] || null;
   }
 
+  // ---------- camera / scanning ----------
   function startCamera(){
     $('camError').style.display = 'none';
     const hints = new Map();
@@ -556,6 +646,7 @@ video{width:100%;height:100%;object-fit:cover;}
     checkIin(iin);
   }
 
+  // ---------- checking / overlay ----------
   function checkIin(iin){
     overlayLocked = true;
     const hit = guestMap.get(iin);
@@ -615,6 +706,7 @@ video{width:100%;height:100%;object-fit:cover;}
     $('statDeny').textContent = stats.deny;
   }
 
+  // ---------- manual entry ----------
   function openManual(){ $('manualModal').classList.add('show'); $('manualInput').value=''; $('manualInput').focus(); }
   function closeManual(){ $('manualModal').classList.remove('show'); }
   $('manualBtn').addEventListener('click', openManual);
@@ -629,6 +721,7 @@ video{width:100%;height:100%;object-fit:cover;}
     checkIin(v);
   });
 
+  // ---------- log modal ----------
   function openLog(){
     const wrap = $('logList');
     if(!log.length){ wrap.innerHTML = '<p class="empty-note">Пока нет сканирований</p>'; }
@@ -660,6 +753,7 @@ video{width:100%;height:100%;object-fit:cover;}
     a.click();
   });
 
+  // ---------- init ----------
   updateStatsUI();
   attemptAutoLoad();
 })();

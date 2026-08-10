@@ -613,8 +613,51 @@ video{width:100%;height:100%;object-fit:cover;}
   }
 
   // ---------- camera / scanning ----------
-  function startCamera(){
+  let mediaStream = null;
+  let rafId = null;
+  let barcodeDetector = null;
+
+  async function startCamera(){
     $('camError').style.display = 'none';
+    scanning = true;
+    try{
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width:{ideal:1920}, height:{ideal:1080} }
+      });
+      const video = document.getElementById('video');
+      video.srcObject = mediaStream;
+      await video.play();
+
+      if('BarcodeDetector' in window){
+        let formats;
+        try{ formats = await window.BarcodeDetector.getSupportedFormats(); }
+        catch(e){ formats = ['pdf417','code_128','code_93','code_39','codabar','itf','ean_13','ean_8','upc_a','upc_e','qr_code','data_matrix','aztec']; }
+        barcodeDetector = new window.BarcodeDetector({formats});
+        scanLoopNative(video);
+      } else {
+        startZXingFallback(video);
+      }
+    }catch(err){
+      $('camError').style.display = 'flex';
+      $('camErrorText').textContent = 'Ошибка доступа к камере: ' + (err && err.message ? err.message : err);
+    }
+  }
+
+  function scanLoopNative(video){
+    async function tick(){
+      if(!scanning) return;
+      if(!overlayLocked){
+        try{
+          const codes = await barcodeDetector.detect(video);
+          if(codes && codes.length) handleScan(codes[0].rawValue);
+        }catch(e){ /* detection glitches are normal, keep looping */ }
+      }
+      rafId = requestAnimationFrame(tick);
+    }
+    rafId = requestAnimationFrame(tick);
+  }
+
+  function startZXingFallback(video){
     const hints = new Map();
     hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
       ZXing.BarcodeFormat.PDF_417, ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_93,
@@ -624,23 +667,17 @@ video{width:100%;height:100%;object-fit:cover;}
     ]);
     hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
     reader = new ZXing.BrowserMultiFormatReader(hints);
-    scanning = true;
-
-    reader.decodeFromConstraints(
-      { video: { facingMode: { ideal: 'environment' }, width:{ideal:1920}, height:{ideal:1080} } },
-      'video',
-      (result) => {
-        if(overlayLocked || !scanning) return;
-        if(result) handleScan(result.getText());
-      }
-    ).catch(err=>{
-      $('camError').style.display = 'flex';
-      $('camErrorText').textContent = 'Ошибка доступа к камере: ' + (err && err.message ? err.message : err);
+    reader.decodeFromVideoElement(video, (result) => {
+      if(overlayLocked || !scanning) return;
+      if(result) handleScan(result.getText());
     });
   }
+
   function stopCamera(){
     scanning = false;
+    if(rafId) cancelAnimationFrame(rafId);
     if(reader){ try{ reader.reset(); }catch(e){} }
+    if(mediaStream){ mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
   }
   function handleScan(rawText){
     const iin = extractIin(rawText);

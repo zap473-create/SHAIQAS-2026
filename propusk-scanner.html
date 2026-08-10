@@ -8,7 +8,6 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.min.js"></script>
 <style>
 :root{
   --bg:#0B0E11;
@@ -303,18 +302,6 @@ video{width:100%;height:100%;object-fit:cover;}
         </svg>
         <div class="sweep"></div>
       </div>
-      <div class="plate-reticle" id="carReticle" style="display:none;">
-        <svg viewBox="0 0 100 22">
-          <path class="corner" d="M2 8 V2 H10"/>
-          <path class="corner" d="M90 2 H98 V8"/>
-          <path class="corner" d="M98 14 V20 H90"/>
-          <path class="corner" d="M10 20 H2 V14"/>
-        </svg>
-      </div>
-      <div class="ocr-overlay" id="ocrOverlay">
-        <div class="ocr-spinner"></div>
-        <p>Распознаём номер…</p>
-      </div>
       <div class="cam-error" id="camError" style="display:none;">
         <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2"><path d="M1 1l22 22M17 17H4a2 2 0 01-2-2V7a2 2 0 012-2h1l1-2h4l1 2h2M16 5h4a2 2 0 012 2v9"/></svg>
         <div>
@@ -325,28 +312,19 @@ video{width:100%;height:100%;object-fit:cover;}
       </div>
     </div>
 
+    <div id="carPanel" style="display:none;flex:1;flex-direction:column;justify-content:center;align-items:center;padding:24px 20px;gap:16px;background:var(--bg);">
+      <div class="eyebrow">🚗 ПРОВЕРКА НОМЕРА АВТОМОБИЛЯ</div>
+      <input type="text" id="plateInputInline" maxlength="8" style="width:100%;max-width:320px;text-transform:uppercase;text-align:center;font-size:28px;letter-spacing:.08em;padding:18px;font-family:var(--mono);background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:12px;" placeholder="XXXYYYXX">
+      <button class="btn btn-primary" id="plateSubmitInline" style="width:100%;max-width:320px;padding:16px;font-size:16px;">Проверить</button>
+      <p class="hint" style="text-align:center;max-width:320px;">Формат: 3 цифры, 3 буквы, 2 цифры (например 086APY01)</p>
+    </div>
+
     <div class="scan-caption">
       <p id="scanCaption">Наведите камеру на штрих-код удостоверения · список: <span id="listCountInline">0</span> гостей</p>
       <div class="scan-actions" id="peopleActions">
         <button class="btn" id="manualBtn">✎ Ввести вручную</button>
         <button class="btn" id="switchCamBtn">🔄 Другая камера</button>
       </div>
-      <div class="scan-actions" id="carActions" style="display:none;">
-        <button class="btn btn-primary" id="capturePlateBtn">📷 Распознать номер</button>
-        <button class="btn" id="manualPlateBtn">✎ Вручную</button>
-        <button class="btn" id="switchCamBtn2">🔄 Камера</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ============ MANUAL PLATE ENTRY MODAL ============ -->
-  <div class="modal-backdrop" id="plateModal">
-    <div class="modal">
-      <p class="modal-title">Ручной ввод номера<span class="icon-btn" id="plateClose" style="width:30px;height:30px;">✕</span></p>
-      <label class="field-label">Гос. номер (например 086APY01)</label>
-      <input type="text" id="plateInput" maxlength="8" style="text-transform:uppercase;" placeholder="XXXYYYXX">
-      <div class="spacer-14"></div>
-      <button class="btn btn-primary" id="plateSubmit" style="width:100%;padding:14px;">Проверить</button>
     </div>
   </div>
 
@@ -836,7 +814,6 @@ video{width:100%;height:100%;object-fit:cover;}
     if(rafId) cancelAnimationFrame(rafId);
     if(reader){ try{ reader.reset(); }catch(e){} }
     if(mediaStream){ mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
-    if(ocrWorker){ try{ ocrWorker.terminate(); }catch(e){} ocrWorker = null; }
   }
   function handleScan(rawText){
     const iin = extractIin(rawText);
@@ -964,18 +941,14 @@ video{width:100%;height:100%;object-fit:cover;}
     checkIin(v);
   });
 
-  // ---------- manual plate entry ----------
-  function openPlateManual(){ $('plateModal').classList.add('show'); $('plateInput').value=''; $('plateInput').focus(); }
-  function closePlateManual(){ $('plateModal').classList.remove('show'); }
-  $('manualPlateBtn').addEventListener('click', openPlateManual);
-  $('plateClose').addEventListener('click', closePlateManual);
-  $('plateModal').addEventListener('click', e=>{ if(e.target.id==='plateModal') closePlateManual(); });
-  $('plateInput').addEventListener('input', e=>{ e.target.value = normalizePlate(e.target.value).slice(0,8); });
-  $('plateSubmit').addEventListener('click', ()=>{
-    const v = normalizePlate($('plateInput').value);
-    if(!/^\d{3}[A-ZА-Я]{3}\d{2}$/.test(v)){ $('plateInput').style.borderColor='var(--red)'; return; }
-    closePlateManual();
+  // ---------- manual plate entry (inline panel, no camera/OCR) ----------
+  $('plateInputInline').addEventListener('input', e=>{ e.target.value = normalizePlate(e.target.value).slice(0,8); e.target.style.borderColor = 'var(--border)'; });
+  $('plateInputInline').addEventListener('keydown', e=>{ if(e.key === 'Enter') $('plateSubmitInline').click(); });
+  $('plateSubmitInline').addEventListener('click', ()=>{
+    const v = normalizePlate($('plateInputInline').value);
+    if(!/^\d{3}[A-ZА-Я]{3}\d{2}$/.test(v)){ $('plateInputInline').style.borderColor='var(--red)'; return; }
     checkPlate(v);
+    $('plateInputInline').value = '';
   });
 
   // ---------- mode switching ----------
@@ -984,90 +957,14 @@ video{width:100%;height:100%;object-fit:cover;}
     const isCars = mode === 'cars';
     $('modeTabPeople').classList.toggle('active', !isCars);
     $('modeTabCars').classList.toggle('active', isCars);
-    $('peopleReticle').style.display = isCars ? 'none' : 'block';
-    $('carReticle').style.display = isCars ? 'block' : 'none';
-    $('peopleActions').style.display = isCars ? 'none' : 'flex';
-    $('carActions').style.display = isCars ? 'flex' : 'none';
-    $('scanCaption').textContent = isCars
-      ? `Наведите камеру на номер автомобиля · база: ${carMap.size} номеров`
-      : `Наведите камеру на штрих-код удостоверения · список: ${guestMap.size} гостей`;
+    $('video-wrap').style.display = isCars ? 'none' : 'block';
+    $('carPanel').style.display = isCars ? 'flex' : 'none';
+    $('carPanel').style.flex = isCars ? '1' : '0';
+    document.querySelector('.scan-caption').style.display = isCars ? 'none' : 'block';
+    if(isCars){ setTimeout(()=> $('plateInputInline').focus(), 100); }
   }
   $('modeTabPeople').addEventListener('click', ()=> setMode('people'));
   $('modeTabCars').addEventListener('click', ()=> setMode('cars'));
-
-  // ---------- car plate OCR capture ----------
-  let ocrWorker = null;
-  async function getOcrWorker(){
-    if(ocrWorker) return ocrWorker;
-    ocrWorker = await Tesseract.createWorker('eng');
-    await ocrWorker.setParameters({
-      tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-      tessedit_pageseg_mode: '7' // treat image as a single text line
-    });
-    return ocrWorker;
-  }
-
-  function preprocessPlateCanvas(video){
-    // Crop to the same region the on-screen plate reticle highlights (centered box,
-    // ~82% of viewport width, aspect ratio 520:112), then convert to high-contrast
-    // grayscale — this alone dramatically improves OCR accuracy vs. a raw full frame.
-    const vw = video.videoWidth, vh = video.videoHeight;
-    const targetAspect = 520/112;
-    let cropW = vw * 0.82;
-    let cropH = cropW / targetAspect;
-    if(cropH > vh * 0.6){ cropH = vh * 0.6; cropW = cropH * targetAspect; }
-    const cropX = (vw - cropW) / 2;
-    const cropY = (vh - cropH) / 2;
-
-    const scale = 3; // upscale for better OCR on small text
-    const canvas = document.createElement('canvas');
-    canvas.width = cropW * scale;
-    canvas.height = cropH * scale;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, canvas.width, canvas.height);
-
-    // grayscale + contrast stretch
-    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const d = imgData.data;
-    let min = 255, max = 0;
-    for(let i=0;i<d.length;i+=4){
-      const g = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
-      d[i] = d[i+1] = d[i+2] = g;
-      if(g < min) min = g;
-      if(g > max) max = g;
-    }
-    const range = Math.max(max - min, 1);
-    for(let i=0;i<d.length;i+=4){
-      const v = Math.min(255, Math.max(0, ((d[i] - min) / range) * 255));
-      d[i] = d[i+1] = d[i+2] = v;
-    }
-    ctx.putImageData(imgData, 0, 0);
-    return canvas;
-  }
-
-  $('capturePlateBtn').addEventListener('click', async ()=>{
-    if(!mediaStream || overlayLocked) return;
-    const video = document.getElementById('video');
-    if(!video.videoWidth){ showToast('Камера ещё не готова', false); return; }
-    $('ocrOverlay').classList.add('show');
-    try{
-      const canvas = preprocessPlateCanvas(video);
-      const worker = await getOcrWorker();
-      const { data: { text } } = await worker.recognize(canvas);
-      const plate = extractPlate(text);
-      $('ocrOverlay').classList.remove('show');
-      if(!plate){
-        showToast('Номер не распознан: "' + text.replace(/\s+/g,' ').trim().slice(0,40) + '" — попробуйте ещё раз или введите вручную', false);
-        return;
-      }
-      checkPlate(plate);
-    }catch(e){
-      $('ocrOverlay').classList.remove('show');
-      showToast('Ошибка распознавания: ' + (e && e.message ? e.message : e), false);
-    }
-  });
-
-  $('switchCamBtn2').addEventListener('click', ()=> $('switchCamBtn').click());
 
   // ---------- log modal ----------
   function openLog(){

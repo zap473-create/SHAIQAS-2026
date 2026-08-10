@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -9,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.min.js"></script>
 <style>
 :root{
   --bg:#0B0E11;
@@ -176,6 +176,30 @@ video{width:100%;height:100%;object-fit:cover;}
 .spacer-8{height:8px;}
 .spacer-14{height:14px;}
 ::-webkit-scrollbar{width:0;height:0;}
+
+/* ---------- mode tabs (people / cars) ---------- */
+.mode-tabs{
+  position:absolute;top:calc(58px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);
+  z-index:5;display:flex;gap:4px;background:rgba(23,29,36,.85);border:1px solid var(--border);
+  border-radius:11px;padding:4px;backdrop-filter:blur(6px);
+}
+.mode-tab{padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;white-space:nowrap;}
+.mode-tab.active{background:var(--green-dim);color:#04140A;}
+
+.plate-reticle{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:min(82vw,460px);aspect-ratio:520/112;pointer-events:none;
+}
+.plate-reticle svg{width:100%;height:100%;overflow:visible;}
+.plate-reticle .corner{stroke:var(--amber);stroke-width:3;fill:none;filter:drop-shadow(0 0 5px rgba(245,166,35,.25));}
+
+.ocr-overlay{
+  position:absolute;inset:0;z-index:9;display:none;flex-direction:column;align-items:center;justify-content:center;
+  gap:16px;background:rgba(0,0,0,.75);
+}
+.ocr-overlay.show{display:flex;}
+.ocr-spinner{width:40px;height:40px;border-radius:50%;border:3px solid rgba(255,255,255,.2);border-top-color:var(--amber);animation:spin .8s linear infinite;}
+.ocr-overlay p{font-family:var(--mono);font-size:13px;color:var(--text);margin:0;}
 </style>
 </head>
 <body>
@@ -263,9 +287,14 @@ video{width:100%;height:100%;object-fit:cover;}
 
     <div class="toast" id="toast"></div>
 
+    <div class="mode-tabs">
+      <div class="mode-tab active" id="modeTabPeople">👤 Люди</div>
+      <div class="mode-tab" id="modeTabCars">🚗 Авто</div>
+    </div>
+
     <div id="video-wrap">
       <video id="video" autoplay muted playsinline></video>
-      <div class="reticle">
+      <div class="reticle" id="peopleReticle">
         <svg viewBox="0 0 100 62">
           <path class="corner" d="M2 16 V2 H16"/>
           <path class="corner" d="M84 2 H98 V16"/>
@@ -273,6 +302,18 @@ video{width:100%;height:100%;object-fit:cover;}
           <path class="corner" d="M16 60 H2 V46"/>
         </svg>
         <div class="sweep"></div>
+      </div>
+      <div class="plate-reticle" id="carReticle" style="display:none;">
+        <svg viewBox="0 0 100 22">
+          <path class="corner" d="M2 8 V2 H10"/>
+          <path class="corner" d="M90 2 H98 V8"/>
+          <path class="corner" d="M98 14 V20 H90"/>
+          <path class="corner" d="M10 20 H2 V14"/>
+        </svg>
+      </div>
+      <div class="ocr-overlay" id="ocrOverlay">
+        <div class="ocr-spinner"></div>
+        <p>Распознаём номер…</p>
       </div>
       <div class="cam-error" id="camError" style="display:none;">
         <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2"><path d="M1 1l22 22M17 17H4a2 2 0 01-2-2V7a2 2 0 012-2h1l1-2h4l1 2h2M16 5h4a2 2 0 012 2v9"/></svg>
@@ -286,10 +327,26 @@ video{width:100%;height:100%;object-fit:cover;}
 
     <div class="scan-caption">
       <p id="scanCaption">Наведите камеру на штрих-код удостоверения · список: <span id="listCountInline">0</span> гостей</p>
-      <div class="scan-actions">
+      <div class="scan-actions" id="peopleActions">
         <button class="btn" id="manualBtn">✎ Ввести вручную</button>
         <button class="btn" id="switchCamBtn">🔄 Другая камера</button>
       </div>
+      <div class="scan-actions" id="carActions" style="display:none;">
+        <button class="btn btn-primary" id="capturePlateBtn">📷 Распознать номер</button>
+        <button class="btn" id="manualPlateBtn">✎ Вручную</button>
+        <button class="btn" id="switchCamBtn2">🔄 Камера</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ MANUAL PLATE ENTRY MODAL ============ -->
+  <div class="modal-backdrop" id="plateModal">
+    <div class="modal">
+      <p class="modal-title">Ручной ввод номера<span class="icon-btn" id="plateClose" style="width:30px;height:30px;">✕</span></p>
+      <label class="field-label">Гос. номер (например 086APY01)</label>
+      <input type="text" id="plateInput" maxlength="8" style="text-transform:uppercase;" placeholder="XXXYYYXX">
+      <div class="spacer-14"></div>
+      <button class="btn btn-primary" id="plateSubmit" style="width:100%;padding:14px;">Проверить</button>
     </div>
   </div>
 
@@ -337,10 +394,13 @@ video{width:100%;height:100%;object-fit:cover;}
   // ---------- fixed data source: SHAIQAS spreadsheet, tab "Общий" ----------
   const SHEET_ID = '1c6H5qVpVSmWeljzEjm-NOwhEoIYuRGO633SJ0-O1t2w';
   const SHEET_GID = '418229967'; // "Общий"
+  const CAR_SHEET_GID = '173154878'; // "авто"
   const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}`;
 
   // ---------- state ----------
   let guestMap = new Map();      // iin -> {name, meta}
+  let carMap = new Map();        // plate -> {owner}
+  let currentMode = 'people';    // 'people' | 'cars'
   let reader = null;
   let scanning = false;
   let overlayLocked = false;
@@ -399,9 +459,9 @@ video{width:100%;height:100%;object-fit:cover;}
   }
 
   // ---------- auto load from Google Sheet (JSONP — avoids browser CORS block on fetch()) ----------
-  function fetchFromSheetJSONP(){
+  function fetchSheetTableJSONP(gid){
     return new Promise((resolve, reject) => {
-      const callbackName = 'gsCallback_' + Date.now();
+      const callbackName = 'gsCallback_' + Date.now() + '_' + Math.floor(Math.random()*1e6);
       let settled = false;
       const timer = setTimeout(() => {
         if(settled) return;
@@ -422,7 +482,7 @@ video{width:100%;height:100%;object-fit:cover;}
         cleanup();
         try{
           if(!response || response.status === 'error'){
-            const msg = (response && response.errors && response.errors[0] && response.errors[0].detailed_message) || 'Ошибка запроса к таблице (проверьте, что лист «Общий» существует и доступен)';
+            const msg = (response && response.errors && response.errors[0] && response.errors[0].detailed_message) || 'Ошибка запроса к таблице';
             reject(new Error(msg));
             return;
           }
@@ -434,7 +494,7 @@ video{width:100%;height:100%;object-fit:cover;}
       };
 
       const script = document.createElement('script');
-      script.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?gid=${SHEET_GID}&headers=1&tqx=out:json;responseHandler:${callbackName}&t=${Date.now()}`;
+      script.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?gid=${gid}&headers=1&tqx=out:json;responseHandler:${callbackName}&t=${Date.now()}`;
       script.onerror = () => {
         if(settled) return;
         settled = true;
@@ -478,11 +538,51 @@ video{width:100%;height:100%;object-fit:cover;}
   }
 
   function fetchFromSheet(){
-    return fetchFromSheetJSONP().then(({cols, rows}) => {
+    return fetchSheetTableJSONP(SHEET_GID).then(({cols, rows}) => {
       const map = ingestTable(cols, rows);
       if(map.size === 0) throw new Error('в листе не найдено ни одной строки с 12-значным ИИН');
       guestMap = map;
       saveList();
+      return map.size;
+    });
+  }
+
+  function normalizePlate(s){ return (s||'').toString().toUpperCase().replace(/[^A-ZА-Я0-9]/g,''); }
+
+  function ingestCarTable(cols, rows){
+    let numIdx = cols.findIndex(c => normalizeHeader(c).includes('гос'));
+    let ownerIdx = cols.findIndex(c => normalizeHeader(c).includes('список') || normalizeHeader(c).includes('автомоб') || normalizeHeader(c).includes('владел'));
+    let dataRows = rows;
+    if(numIdx === -1 && rows.length){
+      // fallback: scan rows for a header-like row containing "гос"
+      for(let i=0;i<rows.length;i++){
+        const r = rows[i].map(v=>normalizeHeader(v));
+        const alt = r.findIndex(v=>v.includes('гос'));
+        if(alt > -1){
+          numIdx = alt;
+          ownerIdx = r.findIndex(v=>v.includes('список') || v.includes('автомоб') || v.includes('владел'));
+          dataRows = rows.slice(i+1);
+          break;
+        }
+      }
+    }
+    const newMap = new Map();
+    dataRows.forEach(row=>{
+      const plateRaw = numIdx > -1 ? row[numIdx] : null;
+      const owner = ownerIdx > -1 ? row[ownerIdx] : '';
+      const plate = normalizePlate(plateRaw);
+      if(/^\d{3}[A-ZА-Я]{3}\d{2}$/.test(plate)){
+        newMap.set(plate, {owner: (owner||'').toString().trim()});
+      }
+    });
+    return newMap;
+  }
+
+  function fetchCarList(){
+    return fetchSheetTableJSONP(CAR_SHEET_GID).then(({cols, rows}) => {
+      const map = ingestCarTable(cols, rows);
+      carMap = map;
+      try{ localStorage.setItem('propusk_carlist_cache', JSON.stringify([...carMap.entries()])); }catch(e){}
       return map.size;
     });
   }
@@ -499,6 +599,7 @@ video{width:100%;height:100%;object-fit:cover;}
       .then(count=>{
         $('loadDot').className = 'dot';
         $('loadingTitle').textContent = `Готово: ${count} гостей загружено`;
+        fetchCarList().catch(()=>{}); // best-effort, don't block on this
         setTimeout(()=>{ showScreen('screen-scan'); startCamera(); }, 350);
       })
       .catch(err=>{
@@ -540,7 +641,7 @@ video{width:100%;height:100%;object-fit:cover;}
     $('listSummaryCard').style.display = n>0 ? 'block' : 'none';
     $('listCountPill').textContent = `${n} гост.`;
     $('startScanBtn').disabled = n===0;
-    $('listCountInline').textContent = n;
+    if(document.getElementById('screen-scan').classList.contains('active')) setMode(currentMode);
   }
 
   $('fileInput').addEventListener('change', e=>{
@@ -593,8 +694,8 @@ video{width:100%;height:100%;object-fit:cover;}
   $('refreshBtn').addEventListener('click', ()=>{
     const btn = $('refreshBtn');
     btn.classList.add('spinning');
-    fetchFromSheet()
-      .then(count=>{ refreshListUI(); showToast(`Список обновлён: ${count} гостей`, true); })
+    Promise.all([fetchFromSheet(), fetchCarList().catch(()=>0)])
+      .then(([count, carCount])=>{ refreshListUI(); showToast(`Обновлено: ${count} гостей, ${carCount} авто`, true); })
       .catch(err=> showToast('Ошибка обновления: ' + err.message, false))
       .finally(()=> btn.classList.remove('spinning'));
   });
@@ -694,6 +795,7 @@ video{width:100%;height:100%;object-fit:cover;}
     let lastErrorShown = 0;
     async function tick(){
       if(!scanning) return;
+      if(currentMode !== 'people'){ rafId = requestAnimationFrame(tick); return; }
       ticks++;
       if(ticks === 30){ showToast('Сканер активен, кадров обработано: ' + ticks, true); }
       if(!overlayLocked){
@@ -724,7 +826,7 @@ video{width:100%;height:100%;object-fit:cover;}
     hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
     reader = new ZXing.BrowserMultiFormatReader(hints);
     reader.decodeFromVideoElement(video, (result) => {
-      if(overlayLocked || !scanning) return;
+      if(currentMode !== 'people' || overlayLocked || !scanning) return;
       if(result) handleScan(result.getText());
     });
   }
@@ -751,10 +853,40 @@ video{width:100%;height:100%;object-fit:cover;}
     stats.total++;
     if(hit){ stats.allow++; } else { stats.deny++; }
     updateStatsUI();
-    log.unshift({iin, name: hit?hit.name:'', meta: hit?hit.meta:'', ok: !!hit, time: new Date()});
+    log.unshift({type:'person', iin, name: hit?hit.name:'', meta: hit?hit.meta:'', ok: !!hit, time: new Date()});
     if(navigator.vibrate) navigator.vibrate(hit ? [40] : [60,60,60]);
     playTone(hit);
-    showOverlay(hit, iin);
+    showOverlay({
+      ok: !!hit,
+      title: hit ? 'ВХОД РАЗРЕШЁН' : 'ДАННОГО ЧЕЛОВЕКА В СПИСКАХ НЕТ',
+      code: hit ? 'STATUS: ACCESS_GRANTED' : 'STATUS: ACCESS_DENIED',
+      name: hit && hit.name ? hit.name : (hit ? 'Имя не указано' : 'Неизвестный гость'),
+      meta: `ИИН · ${iin}` + (hit && hit.meta ? `  ·  ${hit.meta}` : '')
+    });
+  }
+
+  function extractPlate(text){
+    const cleaned = normalizePlate(text);
+    const match = cleaned.match(/\d{3}[A-ZА-Я]{3}\d{2}/);
+    return match ? match[0] : null;
+  }
+
+  function checkPlate(plate){
+    overlayLocked = true;
+    const hit = carMap.get(plate);
+    stats.total++;
+    if(hit){ stats.allow++; } else { stats.deny++; }
+    updateStatsUI();
+    log.unshift({type:'car', iin: plate, name: hit?hit.owner:'', meta: '', ok: !!hit, time: new Date()});
+    if(navigator.vibrate) navigator.vibrate(hit ? [40] : [60,60,60]);
+    playTone(hit);
+    showOverlay({
+      ok: !!hit,
+      title: hit ? 'ВЪЕЗД РАЗРЕШЁН' : 'ДАННОГО АВТОМОБИЛЯ В СПИСКАХ НЕТ',
+      code: hit ? 'STATUS: ACCESS_GRANTED' : 'STATUS: ACCESS_DENIED',
+      name: hit && hit.owner ? hit.owner : (hit ? 'Владелец не указан' : 'Неизвестный автомобиль'),
+      meta: `НОМЕР · ${plate}`
+    });
   }
 
   function playTone(ok){
@@ -784,14 +916,14 @@ video{width:100%;height:100%;object-fit:cover;}
   const ICON_CHECK = '<path d="M20 6L9 17l-5-5"/>';
   const ICON_CROSS = '<path d="M18 6L6 18M6 6l12 12"/>';
 
-  function showOverlay(hit, iin){
+  function showOverlay(data){
     const ov = $('overlay');
-    ov.className = (hit ? 'allow' : 'deny') + ' show';
-    $('gateIcon').innerHTML = hit ? ICON_CHECK : ICON_CROSS;
-    $('gateStatus').textContent = hit ? 'ВХОД РАЗРЕШЁН' : 'ДАННОГО ЧЕЛОВЕКА В СПИСКАХ НЕТ';
-    $('gateCode').textContent = hit ? 'STATUS: ACCESS_GRANTED' : 'STATUS: ACCESS_DENIED';
-    $('gateName').textContent = hit && hit.name ? hit.name : (hit ? 'Имя не указано' : 'Неизвестный гость');
-    $('gateMeta').textContent = `ИИН · ${iin}` + (hit && hit.meta ? `  ·  ${hit.meta}` : '');
+    ov.className = (data.ok ? 'allow' : 'deny') + ' show';
+    $('gateIcon').innerHTML = data.ok ? ICON_CHECK : ICON_CROSS;
+    $('gateStatus').textContent = data.title;
+    $('gateCode').textContent = data.code;
+    $('gateName').textContent = data.name;
+    $('gateMeta').textContent = data.meta;
   }
   $('overlay').addEventListener('click', ()=>{
     $('overlay').className = '';
@@ -830,6 +962,65 @@ video{width:100%;height:100%;object-fit:cover;}
     closeManual();
     checkIin(v);
   });
+
+  // ---------- manual plate entry ----------
+  function openPlateManual(){ $('plateModal').classList.add('show'); $('plateInput').value=''; $('plateInput').focus(); }
+  function closePlateManual(){ $('plateModal').classList.remove('show'); }
+  $('manualPlateBtn').addEventListener('click', openPlateManual);
+  $('plateClose').addEventListener('click', closePlateManual);
+  $('plateModal').addEventListener('click', e=>{ if(e.target.id==='plateModal') closePlateManual(); });
+  $('plateInput').addEventListener('input', e=>{ e.target.value = normalizePlate(e.target.value).slice(0,8); });
+  $('plateSubmit').addEventListener('click', ()=>{
+    const v = normalizePlate($('plateInput').value);
+    if(!/^\d{3}[A-ZА-Я]{3}\d{2}$/.test(v)){ $('plateInput').style.borderColor='var(--red)'; return; }
+    closePlateManual();
+    checkPlate(v);
+  });
+
+  // ---------- mode switching ----------
+  function setMode(mode){
+    currentMode = mode;
+    const isCars = mode === 'cars';
+    $('modeTabPeople').classList.toggle('active', !isCars);
+    $('modeTabCars').classList.toggle('active', isCars);
+    $('peopleReticle').style.display = isCars ? 'none' : 'block';
+    $('carReticle').style.display = isCars ? 'block' : 'none';
+    $('peopleActions').style.display = isCars ? 'none' : 'flex';
+    $('carActions').style.display = isCars ? 'flex' : 'none';
+    $('scanCaption').textContent = isCars
+      ? `Наведите камеру на номер автомобиля · база: ${carMap.size} номеров`
+      : `Наведите камеру на штрих-код удостоверения · список: ${guestMap.size} гостей`;
+  }
+  $('modeTabPeople').addEventListener('click', ()=> setMode('people'));
+  $('modeTabCars').addEventListener('click', ()=> setMode('cars'));
+
+  // ---------- car plate OCR capture ----------
+  $('capturePlateBtn').addEventListener('click', async ()=>{
+    if(!mediaStream || overlayLocked) return;
+    const video = document.getElementById('video');
+    if(!video.videoWidth){ showToast('Камера ещё не готова', false); return; }
+    $('ocrOverlay').classList.add('show');
+    try{
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const { data: { text } } = await Tesseract.recognize(canvas, 'eng');
+      const plate = extractPlate(text);
+      $('ocrOverlay').classList.remove('show');
+      if(!plate){
+        showToast('Номер не распознан: "' + text.replace(/\s+/g,' ').trim().slice(0,40) + '" — попробуйте ещё раз или введите вручную', false);
+        return;
+      }
+      checkPlate(plate);
+    }catch(e){
+      $('ocrOverlay').classList.remove('show');
+      showToast('Ошибка распознавания: ' + (e && e.message ? e.message : e), false);
+    }
+  });
+
+  $('switchCamBtn2').addEventListener('click', ()=> $('switchCamBtn').click());
 
   // ---------- log modal ----------
   function openLog(){

@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -371,6 +372,23 @@ video{width:100%;height:100%;object-fit:cover;}
 
   // ---------- fixed data source: SHAIQAS spreadsheet, tab "Общий" ----------
   const SHEET_ID = '1c6H5qVpVSmWeljzEjm-NOwhEoIYuRGO633SJ0-O1t2w';
+  const APPS_SCRIPT_LOG_URL = 'https://script.google.com/macros/s/AKfycbxgYr6MZiPircFp1HMrWET7Ixgd18UX7K74gbv-UVDjdfax29X1t5R0t71XeQ4bfsy6XA/exec';
+
+  // Fire-and-forget: sends a log entry to the "Журнал" sheet in the background.
+  // Never blocks or delays the on-screen result — if it fails (no internet,
+  // slow connection), the local session log/CSV export still has the record.
+  function logVisitRemote(type, name, code, cat, ok){
+    try{
+      const url = APPS_SCRIPT_LOG_URL
+        + '?log=1'
+        + '&type=' + encodeURIComponent(type)
+        + '&name=' + encodeURIComponent(name || '')
+        + '&code=' + encodeURIComponent(code || '')
+        + '&cat=' + encodeURIComponent(cat || '')
+        + '&result=' + encodeURIComponent(ok ? 'Разрешено' : 'Отказано');
+      fetch(url, { mode: 'no-cors' }).catch(()=>{});
+    }catch(e){ /* never let logging break the scan flow */ }
+  }
   const SHEET_GID = '418229967'; // "Общий"
   const CAR_SHEET_GID = '173154878'; // "авто"
   const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}`;
@@ -832,6 +850,7 @@ video{width:100%;height:100%;object-fit:cover;}
     if(hit){ stats.allow++; } else { stats.deny++; }
     updateStatsUI();
     log.unshift({type:'person', iin, name: hit?hit.name:'', meta: hit?hit.meta:'', ok: !!hit, time: new Date()});
+    logVisitRemote('Человек', hit ? hit.name : '', iin, hit ? hit.meta : '', !!hit);
     if(navigator.vibrate) navigator.vibrate(hit ? [40] : [60,60,60]);
     playTone(hit);
     showOverlay({
@@ -856,6 +875,7 @@ video{width:100%;height:100%;object-fit:cover;}
     if(hit){ stats.allow++; } else { stats.deny++; }
     updateStatsUI();
     log.unshift({type:'car', iin: plate, name: hit?hit.owner:'', meta: '', ok: !!hit, time: new Date()});
+    logVisitRemote('Авто', hit ? hit.owner : '', plate, '', !!hit);
     if(navigator.vibrate) navigator.vibrate(hit ? [40] : [60,60,60]);
     playTone(hit);
     showOverlay({

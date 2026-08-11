@@ -317,7 +317,7 @@ video{width:100%;height:100%;object-fit:cover;}
       <div class="eyebrow">🚗 ПРОВЕРКА НОМЕРА АВТОМОБИЛЯ</div>
       <input type="text" id="plateInputInline" maxlength="8" style="width:100%;max-width:320px;text-transform:uppercase;text-align:center;font-size:28px;letter-spacing:.08em;padding:18px;font-family:var(--mono);background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:12px;" placeholder="XXXYYYXX">
       <button class="btn btn-primary" id="plateSubmitInline" style="width:100%;max-width:320px;padding:16px;font-size:16px;">Проверить</button>
-      <p class="hint" style="text-align:center;max-width:320px;">Формат: 3 цифры, 3 буквы, 2 цифры (например 086APY01)</p>
+      <p class="hint" style="text-align:center;max-width:320px;">Формат: 3 цифры + 3 буквы + 2 цифры (086APY01), или служебный — 3 цифры + 2 буквы + 2 цифры (086AP01)</p>
     </div>
 
     <div class="scan-caption">
@@ -567,7 +567,7 @@ video{width:100%;height:100%;object-fit:cover;}
       const plateRaw = numIdx > -1 ? row[numIdx] : null;
       const owner = ownerIdx > -1 ? row[ownerIdx] : '';
       const plate = normalizePlate(plateRaw);
-      if(/^\d{3}[A-ZА-Я]{3}\d{2}$/.test(plate)){
+      if(/^\d{3}[A-ZА-Я]{2,3}\d{2}$/.test(plate)){
         newMap.set(plate, {owner: (owner||'').toString().trim()});
       }
     });
@@ -864,7 +864,7 @@ video{width:100%;height:100%;object-fit:cover;}
 
   function extractPlate(text){
     const cleaned = normalizePlate(text);
-    const match = cleaned.match(/\d{3}[A-ZА-Я]{3}\d{2}/);
+    const match = cleaned.match(/\d{3}[A-ZА-Я]{2,3}\d{2}/);
     return match ? match[0] : null;
   }
 
@@ -966,7 +966,7 @@ video{width:100%;height:100%;object-fit:cover;}
   $('plateInputInline').addEventListener('keydown', e=>{ if(e.key === 'Enter') $('plateSubmitInline').click(); });
   $('plateSubmitInline').addEventListener('click', ()=>{
     const v = normalizePlate($('plateInputInline').value);
-    if(!/^\d{3}[A-ZА-Я]{3}\d{2}$/.test(v)){ $('plateInputInline').style.borderColor='var(--red)'; return; }
+    if(!/^\d{3}[A-ZА-Я]{2,3}\d{2}$/.test(v)){ $('plateInputInline').style.borderColor='var(--red)'; return; }
     checkPlate(v);
     $('plateInputInline').value = '';
   });
